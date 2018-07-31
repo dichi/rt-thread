@@ -49,19 +49,6 @@
 #include <rtthread.h>
 #include "finsh.h"
 
-rt_inline unsigned int rt_list_len(const rt_list_t *l)
-{
-    unsigned int len = 0;
-    const rt_list_t *p = l;
-    while (p->next != l)
-    {
-        p = p->next;
-        len ++;
-    }
-
-    return len;
-}
-
 long hello(void)
 {
     rt_kprintf("Hello RT-Thread!\n");
@@ -80,13 +67,11 @@ long version(void)
 FINSH_FUNCTION_EXPORT(version, show RT-Thread version information);
 MSH_CMD_EXPORT(version, show RT-Thread version information);
 
-extern struct rt_object_information rt_object_container[];
-
-static int object_name_maxlen(struct rt_list_node *list)
+static int object_name_maxlen(const char *type_name, struct rt_list_node *list)
 {
     struct rt_list_node *node;
     struct rt_object *object = NULL;
-    int max_length = 0, length;
+    int max_length = rt_strlen(type_name), length;
 
     rt_enter_critical();
     for (node = list->next; node != list; node = node->next)
@@ -114,20 +99,23 @@ static long _list_thread(struct rt_list_node *list)
     rt_uint8_t *ptr;
     struct rt_thread *thread;
     struct rt_list_node *node;
+    const char *item_title = "thread";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s pri status      sp     stack size max used left tick  error\n", maxlen, "thread"); object_split(maxlen);
-    rt_kprintf(     " --  ------- ---------- ----------  ------  ---------- ---\n");
+    rt_kprintf("%-*.s pri  status      sp     stack size max used left tick  error\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     " ---  ------- ---------- ----------  ------  ---------- ---\n");
     for (node = list->next; node != list; node = node->next)
     {
+        rt_uint8_t stat;
         thread = rt_list_entry(node, struct rt_thread, list);
-        rt_kprintf("%-*.*s %02d ", maxlen, RT_NAME_MAX, thread->name, thread->current_priority);
+        rt_kprintf("%-*.*s %3d ", maxlen, RT_NAME_MAX, thread->name, thread->current_priority);
 
-        if (thread->stat == RT_THREAD_READY)        rt_kprintf(" ready  ");
-        else if (thread->stat == RT_THREAD_SUSPEND) rt_kprintf(" suspend");
-        else if (thread->stat == RT_THREAD_INIT)    rt_kprintf(" init   ");
-        else if (thread->stat == RT_THREAD_CLOSE)   rt_kprintf(" close  ");
+        stat = (thread->stat & RT_THREAD_STAT_MASK);
+        if (stat == RT_THREAD_READY)        rt_kprintf(" ready  ");
+        else if (stat == RT_THREAD_SUSPEND) rt_kprintf(" suspend");
+        else if (stat == RT_THREAD_INIT)    rt_kprintf(" init   ");
+        else if (stat == RT_THREAD_CLOSE)   rt_kprintf(" close  ");
 
         ptr = (rt_uint8_t *)thread->stack_addr;
         while (*ptr == '#')ptr ++;
@@ -146,7 +134,10 @@ static long _list_thread(struct rt_list_node *list)
 
 long list_thread(void)
 {
-    return _list_thread(&rt_object_container[RT_Object_Class_Thread].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_Thread);
+    return _list_thread(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_thread, list thread);
 MSH_CMD_EXPORT(list_thread, list thread);
@@ -172,11 +163,11 @@ static long _list_sem(struct rt_list_node *list)
     int maxlen;
     struct rt_semaphore *sem;
     struct rt_list_node *node;
+    const char *item_title = "semaphore";
 
-    maxlen = object_name_maxlen(list);
-    if (maxlen < 9) maxlen = 9;
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s v   suspend thread\n", maxlen, "semaphore"); object_split(maxlen);
+    rt_kprintf("%-*.s v   suspend thread\n", maxlen, item_title); object_split(maxlen);
     rt_kprintf(     " --- --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
@@ -206,7 +197,11 @@ static long _list_sem(struct rt_list_node *list)
 
 long list_sem(void)
 {
-    return _list_sem(&rt_object_container[RT_Object_Class_Semaphore].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_Semaphore);
+
+    return _list_sem(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_sem, list semaphone in system);
 MSH_CMD_EXPORT(list_sem, list semaphore in system);
@@ -218,11 +213,12 @@ static long _list_event(struct rt_list_node *list)
     int maxlen;
     struct rt_event *e;
     struct rt_list_node *node;
+    const char *item_title = "event";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s    set        suspend thread\n", maxlen, "event"); object_split(maxlen);
-    rt_kprintf(" ---------- --------------\n");
+    rt_kprintf("%-*.s      set    suspend thread\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     "  ---------- --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
         e = (struct rt_event *)(rt_list_entry(node, struct rt_object, list));
@@ -248,7 +244,10 @@ static long _list_event(struct rt_list_node *list)
 
 long list_event(void)
 {
-    return _list_event(&rt_object_container[RT_Object_Class_Event].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_Event);
+    return _list_event(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_event, list event in system);
 MSH_CMD_EXPORT(list_event, list event in system);
@@ -260,10 +259,12 @@ static long _list_mutex(struct rt_list_node *list)
     int maxlen;
     struct rt_mutex *m;
     struct rt_list_node *node;
+    const char *item_title = "mutex";
 
-    maxlen = object_name_maxlen(list);
-    rt_kprintf("%-*.s    owner   hold suspend thread\n", maxlen, "mutex"); object_split(maxlen);
-    rt_kprintf(       " -------- ---- --------------\n");
+    maxlen = object_name_maxlen(item_title, list);
+
+    rt_kprintf("%-*.s   owner  hold suspend thread\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     " -------- ---- --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
         m = (struct rt_mutex *)(rt_list_entry(node, struct rt_object, list));
@@ -281,7 +282,11 @@ static long _list_mutex(struct rt_list_node *list)
 
 long list_mutex(void)
 {
-    return _list_mutex(&rt_object_container[RT_Object_Class_Mutex].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_Mutex);
+
+    return _list_mutex(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_mutex, list mutex in system);
 MSH_CMD_EXPORT(list_mutex, list mutex in system);
@@ -293,11 +298,12 @@ static long _list_mailbox(struct rt_list_node *list)
     int maxlen;
     struct rt_mailbox *m;
     struct rt_list_node *node;
+    const char *item_title = "mailbox";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s  entry size suspend thread\n", maxlen, "mailbox"); object_split(maxlen);
-    rt_kprintf(      " ----  ---- --------------\n");
+    rt_kprintf("%-*.s entry size suspend thread\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     " ----  ---- --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
         m = (struct rt_mailbox *)(rt_list_entry(node, struct rt_object, list));
@@ -328,7 +334,10 @@ static long _list_mailbox(struct rt_list_node *list)
 
 long list_mailbox(void)
 {
-    return _list_mailbox(&rt_object_container[RT_Object_Class_MailBox].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_MailBox);
+    return _list_mailbox(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_mailbox, list mail box in system);
 MSH_CMD_EXPORT(list_mailbox, list mail box in system);
@@ -340,10 +349,11 @@ static long _list_msgqueue(struct rt_list_node *list)
     int maxlen;
     struct rt_messagequeue *m;
     struct rt_list_node *node;
+    const char *item_title = "msgqueue";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s entry suspend thread\n", maxlen, "msgqueue"); object_split(maxlen);
+    rt_kprintf("%-*.s entry suspend thread\n", maxlen, item_title); object_split(maxlen);
     rt_kprintf(     " ----  --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
@@ -373,7 +383,10 @@ static long _list_msgqueue(struct rt_list_node *list)
 
 long list_msgqueue(void)
 {
-    return _list_msgqueue(&rt_object_container[RT_Object_Class_MessageQueue].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_MessageQueue);
+    return _list_msgqueue(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_msgqueue, list message queue in system);
 MSH_CMD_EXPORT(list_msgqueue, list message queue in system);
@@ -385,10 +398,11 @@ static long _list_memheap(struct rt_list_node *list)
     int maxlen;
     struct rt_memheap *mh;
     struct rt_list_node *node;
+    const char *item_title = "memheap";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s  pool size  max used size available size\n", maxlen, "memheap"); object_split(maxlen);
+    rt_kprintf("%-*.s  pool size  max used size available size\n", maxlen, item_title); object_split(maxlen);
     rt_kprintf(      " ---------- ------------- --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
@@ -407,7 +421,10 @@ static long _list_memheap(struct rt_list_node *list)
 
 long list_memheap(void)
 {
-    return _list_memheap(&rt_object_container[RT_Object_Class_MemHeap].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_MemHeap);
+    return _list_memheap(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_memheap, list memory heap in system);
 MSH_CMD_EXPORT(list_memheap, list memory heap in system);
@@ -419,11 +436,12 @@ static long _list_mempool(struct rt_list_node *list)
     int maxlen;
     struct rt_mempool *mp;
     struct rt_list_node *node;
+    const char *item_title = "mempool";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s  block total free suspend thread\n", maxlen, "mempool"); object_split(maxlen);
-    rt_kprintf(      " ----  ----  ---- --------------\n");
+    rt_kprintf("%-*.s block total free suspend thread\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     " ----  ----  ---- --------------\n");
     for (node = list->next; node != list; node = node->next)
     {
         mp = (struct rt_mempool *)rt_list_entry(node, struct rt_object, list);
@@ -456,7 +474,10 @@ static long _list_mempool(struct rt_list_node *list)
 
 long list_mempool(void)
 {
-    return _list_mempool(&rt_object_container[RT_Object_Class_MemPool].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_MemPool);
+    return _list_mempool(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_mempool, list memory pool in system)
 MSH_CMD_EXPORT(list_mempool, list memory pool in system);
@@ -467,11 +488,12 @@ static long _list_timer(struct rt_list_node *list)
     int maxlen;
     struct rt_timer *timer;
     struct rt_list_node *node;
+    const char *item_title = "timer";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s    periodic   timeout    flag\n", maxlen, "timer"); object_split(maxlen);
-    rt_kprintf(        " ---------- ---------- -----------\n");
+    rt_kprintf("%-*.s  periodic   timeout       flag\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     " ---------- ---------- -----------\n");
     for (node = list->next; node != list; node = node->next)
     {
         timer = (struct rt_timer *)(rt_list_entry(node, struct rt_object, list));
@@ -493,7 +515,10 @@ static long _list_timer(struct rt_list_node *list)
 
 long list_timer(void)
 {
-    return _list_timer(&rt_object_container[RT_Object_Class_Timer].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_Timer);
+    return _list_timer(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_timer, list timer in system);
 MSH_CMD_EXPORT(list_timer, list timer in system);
@@ -527,11 +552,12 @@ static long _list_device(struct rt_list_node *list)
         "Miscellaneous Device",
         "Unknown"
     };
+    const char *item_title = "device";
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s   type                 ref count\n", maxlen, "device"); object_split(maxlen);
-    rt_kprintf(       " -------------------- ----------\n");
+    rt_kprintf("%-*.s         type         ref count\n", maxlen, item_title); object_split(maxlen);
+    rt_kprintf(     " -------------------- ----------\n");
     for (node = list->next; node != list; node = node->next)
     {
         device = (struct rt_device *)(rt_list_entry(node, struct rt_object, list));
@@ -549,7 +575,10 @@ static long _list_device(struct rt_list_node *list)
 
 long list_device(void)
 {
-    return _list_device(&rt_object_container[RT_Object_Class_Device].object_list);
+    struct rt_object_information *info;
+
+    info = rt_object_get_information(RT_Object_Class_Device);
+    return _list_device(&info->object_list);
 }
 FINSH_FUNCTION_EXPORT(list_device, list device in system);
 MSH_CMD_EXPORT(list_device, list device in system);
@@ -563,18 +592,21 @@ int list_module(void)
     int maxlen;
     struct rt_module *module;
     struct rt_list_node *list, *node;
+    struct rt_object_information *info;
+    const char *item_title = "module";
 
-    list = &rt_object_container[RT_Object_Class_Module].object_list;
+    info = rt_object_get_information(RT_Object_Class_Module);
+    list = &info->object_list;
 
-    maxlen = object_name_maxlen(list);
+    maxlen = object_name_maxlen(item_title, list);
 
-    rt_kprintf("%-*.s ref      address \n", maxlen, "module"); object_split(maxlen);
+    rt_kprintf("%-*.s ref      address \n", maxlen, item_title); object_split(maxlen);
     rt_kprintf(         " -------- ------------\n");
     for (node = list->next; node != list; node = node->next)
     {
         module = (struct rt_module *)(rt_list_entry(node, struct rt_object, list));
         rt_kprintf("%-*.*s %-04d  0x%08x\n",
-                   maxlen, RT_NAME_MAX, 
+                   maxlen, RT_NAME_MAX,
                    module->parent.name, module->nref, module->module_space);
     }
 
@@ -582,110 +614,6 @@ int list_module(void)
 }
 FINSH_FUNCTION_EXPORT(list_module, list module in system);
 MSH_CMD_EXPORT(list_module, list module in system);
-
-int list_mod_detail(const char *name)
-{
-    int i;
-    struct rt_module *module;
-
-    /* find module */
-    if ((module = rt_module_find(name)) != RT_NULL)
-    {
-        /* module has entry point */
-        if (!(module->parent.flag & RT_MODULE_FLAG_WITHOUTENTRY))
-        {
-            struct rt_thread *thread;
-            struct rt_list_node *tlist;
-            rt_uint8_t *ptr;
-
-            /* list main thread in module */
-            if (module->module_thread != RT_NULL)
-            {
-                rt_kprintf("main thread  pri  status      sp     stack size max used   left tick  error\n");
-                rt_kprintf("------------- ---- ------- ---------- ---------- ---------- ---------- ---\n");
-                thread = module->module_thread;
-                rt_kprintf("%-8.*s 0x%02x", RT_NAME_MAX, thread->name, thread->current_priority);
-
-                if (thread->stat == RT_THREAD_READY)        rt_kprintf(" ready  ");
-                else if (thread->stat == RT_THREAD_SUSPEND) rt_kprintf(" suspend");
-                else if (thread->stat == RT_THREAD_INIT)    rt_kprintf(" init   ");
-
-                ptr = (rt_uint8_t *)thread->stack_addr;
-                while (*ptr == '#')ptr ++;
-
-                rt_kprintf(" 0x%08x 0x%08x 0x%08x 0x%08x %03d\n",
-                           thread->stack_size + ((rt_uint32_t)thread->stack_addr - (rt_uint32_t)thread->sp),
-                           thread->stack_size,
-                           thread->stack_size - ((rt_uint32_t) ptr - (rt_uint32_t)thread->stack_addr),
-                           thread->remaining_tick,
-                           thread->error);
-            }
-
-            /* list sub thread in module */
-            tlist = &module->module_object[RT_Object_Class_Thread].object_list;
-            if (!rt_list_isempty(tlist)) _list_thread(tlist);
-#ifdef RT_USING_SEMAPHORE
-            /* list semaphored in module */
-            tlist = &module->module_object[RT_Object_Class_Semaphore].object_list;
-            if (!rt_list_isempty(tlist)) _list_sem(tlist);
-#endif
-#ifdef RT_USING_MUTEX
-            /* list mutex in module */
-            tlist = &module->module_object[RT_Object_Class_Mutex].object_list;
-            if (!rt_list_isempty(tlist)) _list_mutex(tlist);
-#endif
-#ifdef RT_USING_EVENT
-            /* list event in module */
-            tlist = &module->module_object[RT_Object_Class_Event].object_list;
-            if (!rt_list_isempty(tlist)) _list_event(tlist);
-#endif
-#ifdef RT_USING_MAILBOX
-            /* list mailbox in module */
-            tlist = &module->module_object[RT_Object_Class_MailBox].object_list;
-            if (!rt_list_isempty(tlist)) _list_mailbox(tlist);
-#endif
-#ifdef RT_USING_MESSAGEQUEUE
-            /* list message queue in module */
-            tlist = &module->module_object[RT_Object_Class_MessageQueue].object_list;
-            if (!rt_list_isempty(tlist)) _list_msgqueue(tlist);
-#endif
-#ifdef RT_USING_MEMHEAP
-            /* list memory heap in module */
-            tlist = &module->module_object[RT_Object_Class_MemHeap].object_list;
-            if (!rt_list_isempty(tlist)) _list_memheap(tlist);
-#endif
-#ifdef RT_USING_MEMPOOL
-            /* list memory pool in module */
-            tlist = &module->module_object[RT_Object_Class_MemPool].object_list;
-            if (!rt_list_isempty(tlist)) _list_mempool(tlist);
-#endif
-#ifdef RT_USING_DEVICE
-            /* list device in module */
-            tlist = &module->module_object[RT_Object_Class_Device].object_list;
-            if (!rt_list_isempty(tlist)) _list_device(tlist);
-#endif
-            /* list timer in module */
-            tlist = &module->module_object[RT_Object_Class_Timer].object_list;
-            if (!rt_list_isempty(tlist)) _list_timer(tlist);
-        }
-
-        if (module->nsym > 0)
-        {
-            rt_kprintf("symbol    address   \n");
-            rt_kprintf("-------- ----------\n");
-
-            /* list module export symbols */
-            for (i = 0; i < module->nsym; i++)
-            {
-                rt_kprintf("%s 0x%x\n",
-                           module->symtab[i].name, module->symtab[i].addr);
-            }
-        }
-    }
-
-    return 0;
-}
-FINSH_FUNCTION_EXPORT(list_mod_detail, list module objects in system)
 #endif
 
 long list(void)

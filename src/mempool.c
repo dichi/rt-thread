@@ -43,7 +43,7 @@ static void (*rt_mp_free_hook)(struct rt_mempool *mp, void *block);
  * @addtogroup Hook
  */
 
-/*@{*/
+/**@{*/
 
 /**
  * This function will set a hook function, which will be invoked when a memory
@@ -67,14 +67,14 @@ void rt_mp_free_sethook(void (*hook)(struct rt_mempool *mp, void *block))
     rt_mp_free_hook = hook;
 }
 
-/*@}*/
+/**@}*/
 #endif
 
 /**
  * @addtogroup MM
  */
 
-/*@{*/
+/**@{*/
 
 /**
  * This function will initialize a memory pool object, normally which is used
@@ -95,7 +95,7 @@ rt_err_t rt_mp_init(struct rt_mempool *mp,
                     rt_size_t          block_size)
 {
     rt_uint8_t *block_ptr;
-    register rt_base_t offset;
+    register rt_size_t offset;
 
     /* parameter check */
     RT_ASSERT(mp != RT_NULL);
@@ -150,6 +150,8 @@ rt_err_t rt_mp_detach(struct rt_mempool *mp)
 
     /* parameter check */
     RT_ASSERT(mp != RT_NULL);
+    RT_ASSERT(rt_object_get_type(&mp->parent) == RT_Object_Class_MemPool);
+    RT_ASSERT(rt_object_is_systemobject(&mp->parent));
 
     /* wake up all suspended threads */
     while (!rt_list_isempty(&(mp->suspend_thread)))
@@ -200,7 +202,7 @@ rt_mp_t rt_mp_create(const char *name,
 {
     rt_uint8_t *block_ptr;
     struct rt_mempool *mp;
-    register rt_base_t offset;
+    register rt_size_t offset;
 
     RT_DEBUG_NOT_IN_INTERRUPT;
 
@@ -266,6 +268,8 @@ rt_err_t rt_mp_delete(rt_mp_t mp)
 
     /* parameter check */
     RT_ASSERT(mp != RT_NULL);
+    RT_ASSERT(rt_object_get_type(&mp->parent) == RT_Object_Class_MemPool);
+    RT_ASSERT(rt_object_is_systemobject(&mp->parent) == RT_FALSE);
 
     /* wake up all suspended threads */
     while (!rt_list_isempty(&(mp->suspend_thread)))
@@ -291,13 +295,6 @@ rt_err_t rt_mp_delete(rt_mp_t mp)
         /* enable interrupt */
         rt_hw_interrupt_enable(temp);
     }
-
-#if defined(RT_USING_MODULE) && defined(RT_USING_SLAB)
-    /* the mp object belongs to an application module */
-    if (mp->parent.flag & RT_OBJECT_FLAG_MODULE)
-        rt_module_free(mp->parent.module_id, mp->start_address);
-    else
-#endif
 
     /* release allocated room */
     rt_free(mp->start_address);
@@ -465,7 +462,7 @@ void rt_mp_free(void *block)
 }
 RTM_EXPORT(rt_mp_free);
 
-/*@}*/
+/**@}*/
 
 #endif
 

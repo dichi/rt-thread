@@ -26,6 +26,7 @@
  * Date           Author       Notes
  * 2013-03-30     Bernard      the first verion for finsh
  * 2014-01-03     Bernard      msh can execute module.
+ * 2017-07-19     Aubr.Cool    limit argc to RT_FINSH_ARG_MAX
  */
 
 #include "msh.h"
@@ -36,7 +37,10 @@
 #include <dfs_posix.h>
 #endif
 
-#define RT_FINSH_ARG_MAX    10
+#ifndef FINSH_ARG_MAX
+#define FINSH_ARG_MAX    10
+#endif
+
 typedef int (*cmd_function_t)(int argc, char **argv);
 
 #ifdef FINSH_USING_MSH
@@ -98,11 +102,12 @@ int msh_help(int argc, char **argv)
 }
 FINSH_FUNCTION_EXPORT_ALIAS(msh_help, __cmd_help, RT-Thread shell help.);
 
-static int msh_split(char *cmd, rt_size_t length, char *argv[RT_FINSH_ARG_MAX])
+static int msh_split(char *cmd, rt_size_t length, char *argv[FINSH_ARG_MAX])
 {
     char *ptr;
     rt_size_t position;
     rt_size_t argc;
+    rt_size_t i;
 
     ptr = cmd;
     position = 0; argc = 0;
@@ -115,6 +120,18 @@ static int msh_split(char *cmd, rt_size_t length, char *argv[RT_FINSH_ARG_MAX])
             *ptr = '\0';
             ptr ++; position ++;
         }
+
+        if(argc >= FINSH_ARG_MAX)
+        {
+            rt_kprintf("Too many args ! We only Use:\n");
+            for(i = 0; i < argc; i++)
+            {
+                rt_kprintf("%s ", argv[i]);
+            }
+            rt_kprintf("\n");
+            break;
+        }
+
         if (position >= length) break;
 
         /* handle string */
@@ -268,9 +285,9 @@ RTM_EXPORT(system);
 static int _msh_exec_cmd(char *cmd, rt_size_t length, int *retp)
 {
     int argc;
-    int cmd0_size = 0;
+    rt_size_t cmd0_size = 0;
     cmd_function_t cmd_func;
-    char *argv[RT_FINSH_ARG_MAX];
+    char *argv[FINSH_ARG_MAX];
 
     RT_ASSERT(cmd);
     RT_ASSERT(retp);
@@ -296,6 +313,44 @@ static int _msh_exec_cmd(char *cmd, rt_size_t length, int *retp)
     return 0;
 }
 
+#if defined(RT_USING_LWP) && defined(RT_USING_DFS)
+static int _msh_exec_lwp(char *cmd, rt_size_t length)
+{
+    int argc;
+    int cmd0_size = 0;
+    char *argv[FINSH_ARG_MAX];
+    int fd = -1;
+    char *pg_name;
+
+    extern int exec(char*, int, char**);
+
+    /* find the size of first command */
+    while ((cmd[cmd0_size] != ' ' && cmd[cmd0_size] != '\t') && cmd0_size < length)
+        cmd0_size ++;
+    if (cmd0_size == 0)
+        return -1;
+
+    /* split arguments */
+    rt_memset(argv, 0x00, sizeof(argv));
+    argc = msh_split(cmd, length, argv);
+    if (argc == 0)
+        return -1;
+
+    pg_name = argv[0];
+    /* try to open program */
+    fd = open(pg_name, O_RDONLY, 0);
+
+    if (fd < 0)
+        return -1;
+
+    /* found program */
+    close(fd);
+    exec(pg_name, argc, argv);
+
+    return 0;
+}
+#endif
+
 int msh_exec(char *cmd, rt_size_t length)
 {
     int cmd_ret;
@@ -313,13 +368,12 @@ int msh_exec(char *cmd, rt_size_t length)
     /* Exec sequence:
      * 1. built-in command
      * 2. module(if enabled)
-     * 3. chdir to the directry(if possible)
      */
     if (_msh_exec_cmd(cmd, length, &cmd_ret) == 0)
     {
         return cmd_ret;
     }
-#ifdef RT_USING_MODULE
+#if defined(RT_USING_MODULE) && defined(RT_USING_DFS)
     if (msh_exec_module(cmd, length) == 0)
     {
         return 0;
@@ -331,9 +385,10 @@ int msh_exec(char *cmd, rt_size_t length)
     {
         return 0;
     }
+#endif
 
-    /* change to this directory */
-    if (chdir(cmd) == 0)
+#if defined(RT_USING_LWP) && defined(RT_USING_DFS)
+    if (_msh_exec_lwp(cmd, length) == 0)
     {
         return 0;
     }
@@ -391,7 +446,10 @@ void msh_auto_complete_path(char *path)
     ptr = path;
     for (;;)
     {
-        if (*ptr == '/') index = ptr + 1; if (!*ptr) break; ptr ++;
+        if (*ptr == '/') index = ptr + 1; 
+        if (!*ptr) break; 
+
+        ptr ++;
     }
     if (index == RT_NULL) index = path;
 
@@ -431,7 +489,7 @@ void msh_auto_complete_path(char *path)
     }
     else
     {
-        int length, min_length;
+        rt_size_t length, min_length;
 
         min_length = 0;
         for (;;)
