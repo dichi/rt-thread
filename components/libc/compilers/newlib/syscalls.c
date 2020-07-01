@@ -1,17 +1,35 @@
+/*
+ * Copyright (c) 2006-2018, RT-Thread Development Team
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Change Logs:
+ * Date           Author       Notes
+ */
 #include <reent.h>
 #include <sys/errno.h>
 #include <sys/time.h>
+#include <stdio.h>
+
 #include <rtthread.h>
 
 #ifdef RT_USING_DFS
 #include <dfs_posix.h>
 #endif
 
-#ifdef RT_USING_PTHREADS
-#include <pthread.h>
+#ifdef RT_USING_MODULE
+#include <dlmodule.h>
 #endif
 
 /* Reentrant versions of system calls.  */
+
+#ifndef _REENT_ONLY
+int *
+__errno ()
+{
+  return _rt_errno();
+}
+#endif
 
 int
 _close_r(struct _reent *ptr, int fd)
@@ -206,7 +224,7 @@ _ssize_t
 _write_r(struct _reent *ptr, int fd, const void *buf, size_t nbytes)
 {
 #ifndef RT_USING_DFS
-    if (fd == 0)
+    if (fileno(stdout) == fd)
     {
         rt_device_t console;
 
@@ -379,18 +397,12 @@ _free_r (struct _reent *ptr, void *addr)
 }
 
 void
-_exit (int status)
+exit (int status)
 {
 #ifdef RT_USING_MODULE
-    rt_module_t module;
-
-    module = rt_module_self();
-    if (module != RT_NULL)
+    if (dlmodule_self())
     {
-        rt_thread_suspend(rt_thread_self());
-
-        /* re-schedule */
-        rt_schedule();
+        dlmodule_exit(status);
     }
 #endif
 
@@ -425,4 +437,19 @@ void abort(void)
     }
 
     while (1);
+}
+
+uid_t getuid(void)
+{
+    return 0;
+}
+
+mode_t umask(mode_t mask)
+{
+    return 022;
+}
+
+int flock(int fd, int operation)
+{
+    return 0;
 }

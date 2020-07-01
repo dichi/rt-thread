@@ -1,21 +1,7 @@
 /*
- * File      : af_inet_lwip.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2006 - 2018, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -28,12 +14,22 @@
 #include <lwip/netdb.h>
 #include <lwip/api.h>
 #include <lwip/init.h>
+#include <lwip/netif.h>
 
 #ifdef SAL_USING_POSIX
 #include <dfs_poll.h>
 #endif
 
 #include <sal.h>
+#include <af_inet.h>
+
+#include <netdev.h>
+
+#if (LWIP_VERSION < 0x2000000) && NETDEV_IPV6
+#error "The lwIP version is not support IPV6, please disable netdev IPV6 configuration "
+#elif (LWIP_VERSION > 0x2000000) && (NETDEV_IPV6 != LWIP_IPV6)
+#error "IPV6 configuration error, Please check and synchronize netdev and lwip IPV6 configuration."
+#endif
 
 #if LWIP_VERSION < 0x2000000
 #define SELWAIT_T int
@@ -43,6 +39,13 @@
 #endif
 #endif
 
+#ifdef SAL_USING_LWIP
+
+#ifdef SAL_USING_POSIX
+
+#if LWIP_VERSION >= 0x20100ff
+#include <lwip/priv/sockets_priv.h>
+#else /* LWIP_VERSION < 0x20100ff */
 /*
  * Re-define lwip socket
  *
@@ -72,10 +75,9 @@ struct lwip_sock {
     /** counter of how many threads are waiting for this socket using select */
     SELWAIT_T select_waiting;
 
-#ifdef SAL_USING_POSIX
     rt_wqueue_t wait_head;
-#endif
 };
+#endif /* LWIP_VERSION >= 0x20100ff */
 
 extern struct lwip_sock *lwip_tryget_socket(int s);
 
@@ -148,7 +150,11 @@ static void event_callback(struct netconn *conn, enum netconn_evt evt, u16_t len
         break;
     }
 
-    if (sock->lastdata || sock->rcvevent > 0)
+#if LWIP_VERSION >= 0x20100ff
+    if ((void*)(sock->lastdata.pbuf) || (sock->rcvevent > 0))
+#else
+    if ((void*)(sock->lastdata) || (sock->rcvevent > 0))
+#endif
         event |= POLLIN;
     if (sock->sendevent)
         event |= POLLOUT;
@@ -159,14 +165,14 @@ static void event_callback(struct netconn *conn, enum netconn_evt evt, u16_t len
 
     if (event)
     {
-#ifdef SAL_USING_POSIX
         rt_wqueue_wakeup(&sock->wait_head, (void*) event);
-#endif
     }
 }
+#endif /* SAL_USING_POSIX */
 
 static int inet_socket(int domain, int type, int protocol)
 {
+#ifdef SAL_USING_POSIX
     int socket;
 
     socket = lwip_socket(domain, type, protocol);
@@ -177,17 +183,18 @@ static int inet_socket(int domain, int type, int protocol)
         lwsock = lwip_tryget_socket(socket);
         lwsock->conn->callback = event_callback;
 
-#ifdef SAL_USING_POSIX
         rt_wqueue_init(&lwsock->wait_head);
-#endif
-
     }
 
     return socket;
+#else
+    return lwip_socket(domain, type, protocol);
+#endif /* SAL_USING_POSIX */
 }
 
 static int inet_accept(int socket, struct sockaddr *addr, socklen_t *addrlen)
 {
+#ifdef SAL_USING_POSIX
     int new_socket;
 
     new_socket = lwip_accept(socket, addr, addrlen);
@@ -197,12 +204,13 @@ static int inet_accept(int socket, struct sockaddr *addr, socklen_t *addrlen)
 
         lwsock = lwip_tryget_socket(new_socket);
 
-#ifdef SAL_USING_POSIX
         rt_wqueue_init(&lwsock->wait_head);
-#endif
     }
 
     return new_socket;
+#else
+    return lwip_accept(socket, addr, addrlen);
+#endif /* SAL_USING_POSIX */
 }
 
 static int inet_getsockname(int socket, struct sockaddr *name, socklen_t *namelen)
@@ -215,6 +223,20 @@ static int inet_getsockname(int socket, struct sockaddr *name, socklen_t *namele
     return lwip_getsockname(socket, name, namelen);
 }
 
+int inet_ioctlsocket(int socket, long cmd, void *arg)
+{
+    switch (cmd)
+    {
+    case F_GETFL:
+    case F_SETFL:
+        return lwip_fcntl(socket, cmd, (int) arg); 
+
+    default:
+        return lwip_ioctl(socket, cmd, arg);
+    }
+}
+
+#ifdef SAL_USING_POSIX
 static int inet_poll(struct dfs_fd *file, struct rt_pollreq *req)
 {
     int mask = 0;
@@ -235,7 +257,12 @@ static int inet_poll(struct dfs_fd *file, struct rt_pollreq *req)
         rt_poll_add(&sock->wait_head, req);
 
         level = rt_hw_interrupt_disable();
-        if (sock->lastdata || sock->rcvevent)
+
+#if LWIP_VERSION >= 0x20100ff
+        if ((void*)(sock->lastdata.pbuf) || sock->rcvevent)
+#else
+        if ((void*)(sock->lastdata) || sock->rcvevent)
+#endif
         {
             mask |= POLLIN;
         }
@@ -246,57 +273,65 @@ static int inet_poll(struct dfs_fd *file, struct rt_pollreq *req)
         if (sock->errevent)
         {
             mask |= POLLERR;
+            /* clean error event */
+            sock->errevent = 0;
         }
         rt_hw_interrupt_enable(level);
     }
 
     return mask;
 }
+#endif
 
-static const struct proto_ops lwip_inet_stream_ops = {
+static const struct sal_socket_ops lwip_socket_ops =
+{
     inet_socket,
     lwip_close,
     lwip_bind,
     lwip_listen,
     lwip_connect,
     inet_accept,
-    lwip_sendto,
-    lwip_recvfrom,
+    (int (*)(int, const void *, size_t, int, const struct sockaddr *, socklen_t))lwip_sendto,
+    (int (*)(int, void *, size_t, int, struct sockaddr *, socklen_t *))lwip_recvfrom,
     lwip_getsockopt,
     //TODO fix on 1.4.1
     lwip_setsockopt,
     lwip_shutdown,
     lwip_getpeername,
     inet_getsockname,
-    lwip_ioctl,
+    inet_ioctlsocket,
+#ifdef SAL_USING_POSIX
     inet_poll,
+#endif
 };
 
-static int inet_create(struct sal_socket *socket, int type, int protocol)
+static const struct sal_netdb_ops lwip_netdb_ops =
 {
-    RT_ASSERT(socket);
-
-    //TODO Check type & protocol
-
-    socket->ops = &lwip_inet_stream_ops;
-
-    return 0;
-}
-
-static const struct proto_family lwip_inet_family_ops = {
-    AF_INET,
-    AF_INET,
-    inet_create,
     lwip_gethostbyname,
     lwip_gethostbyname_r,
-    lwip_freeaddrinfo,
     lwip_getaddrinfo,
+    lwip_freeaddrinfo,
 };
 
-int lwip_inet_init(void)
+static const struct sal_proto_family lwip_inet_family =
 {
-    sal_proto_family_register(&lwip_inet_family_ops);
+    AF_INET,
+#if LWIP_VERSION > 0x2000000
+    AF_INET6,
+#else
+    AF_INET,
+#endif 
+    &lwip_socket_ops,
+    &lwip_netdb_ops,
+};
 
+/* Set lwIP network interface device protocol family information */
+int sal_lwip_netdev_set_pf_info(struct netdev *netdev)
+{
+    RT_ASSERT(netdev);
+    
+    netdev->sal_user_data = (void *) &lwip_inet_family;
     return 0;
 }
-INIT_COMPONENT_EXPORT(lwip_inet_init);
+
+#endif /* SAL_USING_LWIP */

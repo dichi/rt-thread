@@ -38,11 +38,30 @@
 #define SFUD_DEBUG_MODE
 #endif
 
+#ifdef RT_DEBUG_SFUD
+#define DBG_LVL DBG_LOG
+#define SFUD_DEBUG(fmt, ...)  LOG_D("(%s:%ld) "fmt"", __FILE__, __LINE__, ##__VA_ARGS__)
+#else
+#define DBG_LVL DBG_INFO
+#endif /* RT_DEBUG_SFUD */
+
+#define DBG_TAG "SFUD"
+#include <rtdbg.h>
+extern void rt_kprintf(const char *fmt, ...);
+#define SFUD_INFO(...)        LOG_I(__VA_ARGS__)
+
 /**
  * Using probe flash JEDEC SFDP parameter.
  */
 #ifdef RT_SFUD_USING_SFDP
 #define SFUD_USING_SFDP
+#endif
+
+/**
+ * SFUD will support QSPI mode.
+ */
+#ifdef RT_SFUD_USING_QSPI
+#define SFUD_USING_QSPI
 #endif
 
 /**
@@ -52,6 +71,6 @@
 #define SFUD_USING_FLASH_INFO_TABLE
 #endif
 
-#define SFUD_FLASH_DEVICE_TABLE {0}
+#define SFUD_FLASH_DEVICE_TABLE {{0}}
 
 #endif /* _SFUD_CFG_H_ */

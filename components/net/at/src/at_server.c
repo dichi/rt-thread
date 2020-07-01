@@ -1,21 +1,7 @@
 /*
- * File      : at_server.c
- * This file is part of RT-Thread RTOS
- * COPYRIGHT (C) 2006 - 2018, RT-Thread Development Team
+ * Copyright (c) 2006-2018, RT-Thread Development Team
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
@@ -29,6 +15,11 @@
 #include <string.h>
 
 #include <rthw.h>
+
+#define LOG_TAG              "at.svr"
+#include <at_log.h>
+
+#ifdef AT_USING_SERVER
 
 #define AT_CMD_CHAR_0                  '0'
 #define AT_CMD_CHAR_9                  '9'
@@ -174,6 +165,79 @@ void rt_at_server_print_all_cmd(void)
             at_server_printf("%c%c", AT_CMD_CR, AT_CMD_LF);
         }
     }
+}
+
+/**
+ * Send data to AT Client by uart device.
+ *
+ * @param server current AT server object
+ * @param buf   send data buffer
+ * @param size  send fixed data size
+ *
+ * @return >0: send data size
+ *         =0: send failed
+ */
+rt_size_t at_server_send(at_server_t server, const char *buf, rt_size_t size)
+{
+    RT_ASSERT(buf);
+
+    if (server == RT_NULL)
+    {
+        LOG_E("input AT Server object is NULL, please create or get AT Server object!");
+        return 0;
+    }
+
+    return rt_device_write(server->device, 0, buf, size);
+}
+
+/**
+ * AT Server receive fixed-length data.
+ *
+ * @param client current AT Server object
+ * @param buf   receive data buffer
+ * @param size  receive fixed data size
+ * @param timeout  receive data timeout (ms)
+ *
+ * @note this function can only be used in execution function of AT commands
+ *
+ * @return >0: receive data size
+ *         =0: receive failed
+ */
+rt_size_t at_server_recv(at_server_t server, char *buf, rt_size_t size, rt_int32_t timeout)
+{
+    rt_size_t read_idx = 0;
+    rt_err_t result = RT_EOK;
+    char ch = 0;
+
+    RT_ASSERT(buf);
+
+    if (server == RT_NULL)
+    {
+        LOG_E("input AT Server object is NULL, please create or get AT Server object!");
+        return 0;
+    }
+
+    while (1)
+    {
+        if (read_idx < size)
+        {
+            /* check get data value */
+            result = server->get_char(server, &ch, timeout);
+            if (result != RT_EOK)
+            {
+                LOG_E("AT Server receive failed, uart device get data error.");
+                return 0;
+            }
+
+            buf[read_idx++] = ch;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    return read_idx;
 }
 
 at_server_t at_get_server(void)
@@ -348,17 +412,21 @@ static rt_err_t at_cmd_get_name(const char *cmd_buffer, char *cmd_name)
     return -RT_ERROR;
 }
 
-static char at_server_gerchar(void)
+static rt_err_t at_server_gerchar(at_server_t server, char *ch, rt_int32_t timeout)
 {
-    char ch;
+    rt_err_t result = RT_EOK;
 
-    if (rt_device_read(at_server_local->device, 0, &ch, 1) == 0)
+    while (rt_device_read(at_server_local->device, 0, ch, 1) == 0)
     {
-        rt_sem_take(at_server_local->rx_notice, RT_WAITING_FOREVER);
-        rt_device_read(at_server_local->device, 0, &ch, 1);
+        rt_sem_control(at_server_local->rx_notice, RT_IPC_CMD_RESET, RT_NULL);
+        result = rt_sem_take(at_server_local->rx_notice, rt_tick_from_millisecond(timeout));
+        if (result != RT_EOK)
+        {
+            return result;
+        }
     }
 
-    return ch;
+    return result;
 }
 
 static void server_parser(at_server_t server)
@@ -374,13 +442,23 @@ static void server_parser(at_server_t server)
     RT_ASSERT(server);
     RT_ASSERT(server->status != AT_STATUS_UNINITIALIZED);
 
-    while (ESC_KEY != (ch = server->get_char()))
+    while (1)
     {
+        server->get_char(server, &ch, RT_WAITING_FOREVER);
+        if (ESC_KEY == ch)
+        {
+            break;
+        }
+
         if (server->echo_mode)
         {
             if (ch == AT_CMD_CR || (ch == AT_CMD_LF && last_ch != AT_CMD_CR))
             {
                 at_server_printf("%c%c", AT_CMD_CR, AT_CMD_LF);
+            }
+            else if (ch == AT_CMD_LF)
+            {
+                // skip the end sign check
             }
             else if (ch == BACKSPACE_KEY || ch == DELECT_KEY)
             {
@@ -433,7 +511,10 @@ __retry:
 
 static rt_err_t at_rx_ind(rt_device_t dev, rt_size_t size)
 {
-    rt_sem_release(at_server_local->rx_notice);
+    if (size > 0)
+    {
+        rt_sem_release(at_server_local->rx_notice);
+    }
 
     return RT_EOK;
 }
@@ -482,7 +563,7 @@ int at_server_init(void)
     memset(at_server_local->recv_buffer, 0x00, AT_SERVER_RECV_BUFF_LEN);
     at_server_local->cur_recv_len = 0;
 
-    at_server_local->rx_notice = rt_sem_create("at_server_notice", 0, RT_IPC_FLAG_FIFO);
+    at_server_local->rx_notice = rt_sem_create("at_svr", 0, RT_IPC_FLAG_FIFO);
     if (!at_server_local->rx_notice)
     {
         LOG_E("AT server session initialize failed! at_rx_notice semaphore create failed!");
@@ -518,7 +599,7 @@ int at_server_init(void)
     memcpy(at_server_local->end_mark, AT_CMD_END_MARK, sizeof(AT_CMD_END_MARK));
 
     at_server_local->parser_entry = server_parser;
-    at_server_local->parser = rt_thread_create("at_server",
+    at_server_local->parser = rt_thread_create("at_svr",
                                          (void (*)(void *parameter))server_parser,
                                          at_server_local,
                                          2 * 1024,
@@ -562,3 +643,5 @@ RT_WEAK void at_port_factory_reset(void)
 {
     LOG_E("The factory reset for AT server is not implement.");
 }
+
+#endif /* AT_USING_SERVER */
