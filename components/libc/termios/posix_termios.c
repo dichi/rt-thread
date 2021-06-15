@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2006-2018, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
  * Change Logs:
  * Date           Author       Notes
- * 2017/08/30      Bernard      The first version
+ * 2017/08/30     Bernard      The first version
  */
 #include <stdlib.h>
 #include <string.h>
 #include <rtthread.h>
 #include <dfs_posix.h>
-
+#include <sys/errno.h>
 #include <termios.h>
 
 int tcgetattr(int fd, struct termios *tio)
@@ -109,13 +109,6 @@ int tcflow(int fd, int action)
 int tcdrain(int fd)
 {
     return 0;
-}
-
-int isatty (int  fd)
-{
-    struct termios term;
-
-    return tcgetattr (fd, &term) == 0;
 }
 
 #if defined(_GNU_SOURCE) || defined(_BSD_SOURCE)

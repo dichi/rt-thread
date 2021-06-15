@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2020, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -102,7 +102,7 @@ static void gpio_set_pud(GPIO_PIN pin, GPIO_PUPD_FUNC mode)
     case 3:
         reg_value = GPIO_PUP_PDN_CNTRL_REG3(GPIO_BASE);
         GPIO_PUP_PDN_CNTRL_REG3(GPIO_BASE) = (reg_value | (mode << (fselrest*2)));
-        break;    
+        break;
     default:
         break;
     }
@@ -118,6 +118,34 @@ void prev_raspi_pin_mode(GPIO_PIN pin, GPIO_FUNC mode)
     gpfsel &= ~((uint32_t)(0x07 << (fselrest * 3)));
     gpfsel |= (uint32_t)(mode << (fselrest * 3));
     raspi_set_pin_state(fselnum, gpfsel);
+}
+
+void prev_raspi_pin_write(GPIO_PIN pin, int pin_value)
+{
+    uint32_t num = pin / 32;
+
+    if(num == 0)
+    {
+        if(pin_value == 1)
+        {
+            GPIO_REG_GPSET0(GPIO_BASE) = 1 << (pin % 32);
+        }
+        else
+        {
+            GPIO_REG_GPCLR0(GPIO_BASE) = 1 << (pin % 32);
+        }
+    }
+    else
+    {
+        if(pin_value == 1)
+        {
+            GPIO_REG_GPSET1(GPIO_BASE) = 1 << (pin % 32);
+        }
+        else
+        {
+            GPIO_REG_GPCLR1(GPIO_BASE) = 1 << (pin % 32);
+        }
+    }
 }
 
 static void raspi_pin_mode(struct rt_device *dev, rt_base_t pin, rt_base_t mode)
@@ -149,30 +177,7 @@ static void raspi_pin_mode(struct rt_device *dev, rt_base_t pin, rt_base_t mode)
 
 static void raspi_pin_write(struct rt_device *dev, rt_base_t pin, rt_base_t value)
 {
-    uint32_t num = pin / 32;
-
-    if(num == 0)
-    {
-        if(value == 0)
-        {
-            GPIO_REG_GPSET0(GPIO_BASE) = 1 << (pin % 32);
-        }
-        else
-        {
-            GPIO_REG_GPCLR0(GPIO_BASE) = 1 << (pin % 32);
-        }
-    }
-    else
-    {
-        if(value == 0)
-        {
-            GPIO_REG_GPSET1(GPIO_BASE) = 1 << (pin % 32);
-        }
-        else
-        {
-            GPIO_REG_GPCLR1(GPIO_BASE) = 1 << (pin % 32);
-        }
-    }
+    prev_raspi_pin_write(pin, value);
 }
 
 static int raspi_pin_read(struct rt_device *device, rt_base_t pin)
@@ -189,7 +194,7 @@ static int raspi_pin_read(struct rt_device *device, rt_base_t pin)
         else
         {
             pin_level = 0;
-        }  
+        }
 
     }
     else
@@ -339,6 +344,7 @@ static const struct rt_pin_ops ops =
     raspi_pin_attach_irq,
     raspi_pin_detach_irq,
     raspi_pin_irq_enable,
+    RT_NULL,
 };
 
 static void gpio_irq_handler(int irq, void *param)
@@ -416,7 +422,7 @@ int rt_hw_gpio_init(void)
 
     GPIO_REG_GPAFEN0(GPIO_BASE) = 0x0;
     GPIO_REG_GPAFEN0(GPIO_BASE) = 0x0;
-    
+
     rt_hw_interrupt_install(IRQ_GPIO0, gpio_irq_handler, &_g_gpio_irq_tbl[0], "gpio0_irq");
     rt_hw_interrupt_umask(IRQ_GPIO0);
 

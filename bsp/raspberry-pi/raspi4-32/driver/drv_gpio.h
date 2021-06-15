@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2020, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -134,6 +134,7 @@ typedef enum {
 } GPIO_PUPD_FUNC;
 
 void prev_raspi_pin_mode(GPIO_PIN pin, GPIO_FUNC mode);
+void prev_raspi_pin_write(GPIO_PIN pin, int pin_value);
 int rt_hw_gpio_init(void);
 
 #endif /* __DRV_GPIO_H__ */

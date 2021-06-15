@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2020, RT-Thread Development Team
+ * Copyright (c) 2006-2021, RT-Thread Development Team
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -13,50 +13,54 @@
 
 void list_dir(const char* path)
 {
-    char * fullpath;
-	DIR *dir;
+    char * fullpath = RT_NULL;
+    DIR *dir;
 
-	dir = opendir(path);
-	if (dir != RT_NULL)
-	{
-		struct dirent* dirent;
-		struct stat s;
+    dir = opendir(path);
+    if (dir != RT_NULL)
+    {
+        struct dirent* dirent;
+        struct stat s;
 
-	    fullpath = rt_malloc(256);
-	    if (fullpath == RT_NULL)
-	    {
-	        rt_kprintf("no memory\n");
-	        return;
-	    }
+        fullpath = rt_malloc(256);
+        if (fullpath == RT_NULL)
+        {
+            closedir(dir);
+            rt_kprintf("no memory\n");
+            return;
+        }
 
-		do
-		{
-			dirent = readdir(dir);
-			if (dirent == RT_NULL) break;
-			rt_memset(&s, 0, sizeof(struct stat));
+        do
+        {
+            dirent = readdir(dir);
+            if (dirent == RT_NULL) break;
+            rt_memset(&s, 0, sizeof(struct stat));
 
-			/* build full path for each file */
-			rt_sprintf(fullpath, "%s/%s", path, dirent->d_name);
+            /* build full path for each file */
+            rt_sprintf(fullpath, "%s/%s", path, dirent->d_name);
 
-			stat(fullpath, &s);
-			if ( s.st_mode & S_IFDIR )
-			{
-				rt_kprintf("%s\t\t<DIR>\n", dirent->d_name);
-			}
-			else
-			{
-				rt_kprintf("%s\t\t%lu\n", dirent->d_name, s.st_size);
-			}
-		} while (dirent != RT_NULL);
+            stat(fullpath, &s);
+            if ( s.st_mode & S_IFDIR )
+            {
+                rt_kprintf("%s\t\t<DIR>\n", dirent->d_name);
+            }
+            else
+            {
+                rt_kprintf("%s\t\t%lu\n", dirent->d_name, s.st_size);
+            }
+        } while (dirent != RT_NULL);
 
-		closedir(dir);
-	}
-	else
-	{
-	    rt_kprintf("open %s directory failed\n", path);
-	}
+        closedir(dir);
+    }
+    else
+    {
+        rt_kprintf("open %s directory failed\n", path);
+    }
 
-	rt_free(fullpath);
+    if (RT_NULL != fullpath)
+    {
+        rt_free(fullpath);
+    }
 }
 
 #ifdef RT_USING_FINSH
@@ -79,6 +83,6 @@ static void cmd_list_dir(int argc, char *argv[])
     }
     list_dir(filename);
 }
-FINSH_FUNCTION_EXPORT_ALIAS(cmd_list_dir, __cmd_list_dir, list directory);
+MSH_CMD_EXPORT_ALIAS(cmd_list_dir, list_dir, list directory);
 #endif /* FINSH_USING_MSH */
 #endif /* RT_USING_FINSH */

@@ -5,8 +5,26 @@ from building import *
 Import('rtconfig')
 
 cwd     = GetCurrentDir()
-src     = Glob('*.c') + Glob('*.cpp')
+src     = Split('''
+cache.c
+cpu.c
+gtimer.c
+mmu.c
+pmu.c
+stack.c
+
+''')
 CPPPATH = [cwd]
+
+if GetDepend('RT_USING_GIC_V2'):
+    src += ['interrupt.c']
+    src += ['gic.c']
+    src += ['trap.c']
+
+if GetDepend('RT_USING_GIC_V3'):
+    src += ['interrupt.c']
+    src += ['gicv3.c']
+    src += ['trap.c']
 
 if rtconfig.PLATFORM == 'armcc':
     src += Glob('*_rvds.S')
@@ -18,6 +36,9 @@ if rtconfig.PLATFORM == 'gcc':
 if rtconfig.PLATFORM == 'iar':
     src += Glob('*_iar.S')
 
-group = DefineGroup('cpu', src, depend = [''], CPPPATH = CPPPATH)
+if rtconfig.PLATFORM == 'iar':
+    src += Glob('*_iar.S')
+
+group = DefineGroup('CPU', src, depend = [''], CPPPATH = CPPPATH)
 
 Return('group')
